@@ -21,7 +21,7 @@
 </head>
 <body>
 <script>
-/* 補藥神器外殼（v4）：清單校對（?lst=）也走這裡。
+/* 補藥神器外殼（v5）：清單校對（?lst=）也走這裡；錄音轉 16kHz WAV 再送。
    1. 把 Apps Script 的網頁用 iframe 包進來，Google 那條「這個應用程式是由 Google Apps Script 的使用者建立」就不會出現。
    2. 幫裡面的網頁錄音（裡面那一層包在 Google 的框框裡拿不到麥克風，最外層這一頁拿得到）：
       裡面按 🎤 → 這裡錄最長 6 秒 → 把錄音丟回去 → 裡面送給後端聽寫（跟 LINE 語音同一套）。
@@ -65,6 +65,39 @@
     try { if (rec && rec.state !== "inactive") rec.stop(); } catch (e) {}
   }
   function release(){ try { if (stream) stream.getTracks().forEach(function(t){ t.stop(); }); } catch (e) {} stream = null; rec = null; }
+  /* 錄音轉成 16kHz 單聲道 WAV：手機錄出來的 webm／m4a 格式各家不同，聽寫（Groq／Deepgram／Gemini）拿 wav 最穩。
+     用 OfflineAudioContext 解碼不需要使用者手勢；解不開就回 null，照送原檔。 */
+  function toWav(blob, cb){
+    var AC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!AC || !blob.arrayBuffer) { cb(null); return; }
+    var done = false; function fin(v){ if (!done) { done = true; cb(v); } }
+    setTimeout(function(){ fin(null); }, 4000);
+    blob.arrayBuffer().then(function(buf){
+      var probe = new AC(1, 16000, 16000);
+      var p = probe.decodeAudioData(buf, function(audio){ fin(encode(audio)); }, function(){ fin(null); });
+      if (p && p.then) p.then(function(audio){ fin(encode(audio)); }).catch(function(){ fin(null); });
+    }).catch(function(){ fin(null); });
+    function encode(audio){
+      try {
+        var sr = audio.sampleRate, n = audio.length, ch = audio.numberOfChannels, mono = new Float32Array(n);
+        for (var c = 0; c < ch; c++) { var d = audio.getChannelData(c); for (var i = 0; i < n; i++) mono[i] += d[i] / ch; }
+        var target = 16000, ratio = sr / target, len = Math.floor(n / ratio), pcm = new Int16Array(len);
+        for (var j = 0; j < len; j++) {
+          var s0 = Math.floor(j * ratio), s1 = Math.min(n, Math.floor((j + 1) * ratio)), sum = 0, cnt = 0;
+          for (var k = s0; k < s1; k++) { sum += mono[k]; cnt++; }
+          var v = cnt ? sum / cnt : 0; v = Math.max(-1, Math.min(1, v));
+          pcm[j] = v < 0 ? v * 32768 : v * 32767;
+        }
+        var wav = new ArrayBuffer(44 + pcm.length * 2), dv = new DataView(wav);
+        function str(o, s){ for (var i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); }
+        str(0, "RIFF"); dv.setUint32(4, 36 + pcm.length * 2, true); str(8, "WAVE"); str(12, "fmt ");
+        dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, target, true);
+        dv.setUint32(28, target * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); str(36, "data"); dv.setUint32(40, pcm.length * 2, true);
+        new Int16Array(wav, 44).set(pcm);
+        return new Blob([wav], { type: "audio/wav" });
+      } catch (e) { return null; }
+    }
+  }
   function start(){
     if (rec && rec.state === "recording") return;
     chunks = [];
@@ -79,10 +112,13 @@
         var blob = new Blob(chunks, { type: type });
         release();
         if (!blob.size) { post({ t: "audio", b64: "", mime: type, kb: 0 }); return; }
-        var r = new FileReader();
-        r.onload = function(){ var u = String(r.result); post({ t: "audio", b64: u.substring(u.indexOf(",") + 1), mime: type.split(";")[0], kb: Math.round(blob.size / 1024) }); };
-        r.onerror = function(){ post({ t: "rec-error", why: "read" }); };
-        r.readAsDataURL(blob);
+        toWav(blob, function(wav){
+          var out = wav || blob, om = wav ? "audio/wav" : type.split(";")[0];
+          var r = new FileReader();
+          r.onload = function(){ var u = String(r.result); post({ t: "audio", b64: u.substring(u.indexOf(",") + 1), mime: om, kb: Math.round(out.size / 1024) }); };
+          r.onerror = function(){ post({ t: "rec-error", why: "read" }); };
+          r.readAsDataURL(out);
+        });
       };
       rec.onerror = function(){ release(); post({ t: "rec-error", why: "recorder" }); };
       rec.start();
