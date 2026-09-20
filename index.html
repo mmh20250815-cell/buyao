@@ -21,7 +21,7 @@
 </head>
 <body>
 <script>
-/* 補藥神器外殼（v2）：
+/* 補藥神器外殼（v3）：
    1. 把 Apps Script 的網頁用 iframe 包進來，Google 那條「這個應用程式是由 Google Apps Script 的使用者建立」就不會出現。
    2. 幫裡面的網頁錄音（裡面那一層包在 Google 的框框裡拿不到麥克風，最外層這一頁拿得到）：
       裡面按 🎤 → 這裡錄最長 6 秒 → 把錄音丟回去 → 裡面送給後端聽寫（跟 LINE 語音同一套）。
@@ -42,9 +42,16 @@
   document.body.appendChild(f);
 
   /* ── 錄音 ── */
+  /* 裡面那一頁其實在 Google 的框框裡（我們的 iframe → Google 的頁 → 補藥神器），所以訊息的來源是「孫」不是「子」：
+     記住第一次打招呼的那個視窗，之後都回給它。 */
   var canMic = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
-  var MAX_MS = 6000, rec = null, stream = null, chunks = [], timer = null;
-  function post(m){ try { f.contentWindow.postMessage(Object.assign({ buyao: 1 }, m), "*"); } catch (e) {} }
+  var MAX_MS = 6000, rec = null, stream = null, chunks = [], timer = null, inner = null;
+  function post(m){ try { if (inner) inner.postMessage(Object.assign({ buyao: 1 }, m), "*"); } catch (e) {} }
+  function fromInside(ev){
+    if (!ev.data || ev.data.buyao !== 1 || ev.source === window) return false;
+    var o = String(ev.origin || "");
+    return /^https:\/\/([a-z0-9-]+\.)*(googleusercontent\.com|script\.google\.com)$/.test(o);
+  }
   function pickMime(){
     var list = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
     for (var i = 0; i < list.length; i++) { try { if (MediaRecorder.isTypeSupported(list[i])) return list[i]; } catch (e) {} }
@@ -84,9 +91,10 @@
     });
   }
   window.addEventListener("message", function(ev){
+    if (!fromInside(ev)) return;
     var m = ev.data;
-    if (!m || m.buyao !== 1 || ev.source !== f.contentWindow) return;
-    if (m.t === "hello") { post({ t: "ready", mic: canMic }); return; }
+    if (m.t === "hello") { inner = ev.source; post({ t: "ready", mic: canMic }); return; }
+    if (!inner || ev.source !== inner) return;
     if (m.t === "rec-start") { if (canMic) start(); else post({ t: "rec-error", why: "nomic" }); return; }
     if (m.t === "rec-stop") { stopAll(); return; }
   });
