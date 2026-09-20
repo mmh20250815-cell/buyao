@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>補藥神器</title>
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="補藥神器">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#EEF2F6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E151C" media="(prefers-color-scheme: dark)">
+<style>
+  html,body{margin:0;height:100%;background:#EEF2F6}
+  @media (prefers-color-scheme:dark){ html,body{background:#0E151C} }
+  iframe{border:0;width:100%;height:100%;height:100dvh;display:block}
+  .msg{font-family:-apple-system,"PingFang TC","Noto Sans TC",system-ui,sans-serif;color:#3F5566;padding:32px 22px;line-height:1.8;font-size:16px}
+  @media (prefers-color-scheme:dark){ .msg{color:#B0C0CE} }
+</style>
+</head>
+<body>
+<script>
+/* 補藥神器外殼：只做一件事——把 Apps Script 的網頁用 iframe 包進來，Google 那條「這個應用程式是由 Google Apps Script 的使用者建立」就不會出現。
+   網址長這樣：外殼/?x=部署ID&app=鑰匙（藥師版）或 &dev=鑰匙（開發者版）。鑰匙由 LINE 給，這個檔案裡沒有任何秘密。 */
+(function(){
+  var q = new URLSearchParams(location.search);
+  var x = q.get("x") || "", app = q.get("app") || "", dev = q.get("dev") || "";
+  var tok = dev || app;
+  if (!/^[A-Za-z0-9_-]{20,}$/.test(x) || !/^[0-9a-f]{32}$/.test(tok)) {
+    document.body.innerHTML = '<p class="msg">這條連結不完整。<br>回 LINE 按下面那排的「🌐 補藥神器網頁」再開一次。</p>';
+    return;
+  }
+  var f = document.createElement("iframe");
+  f.src = "https://script.google.com/macros/s/" + x + "/exec?" + (dev ? "dev=" : "app=") + tok;
+  f.allow = "camera; microphone";
+  f.setAttribute("allowfullscreen", "");
+  f.title = "補藥神器";
+  document.body.appendChild(f);
+})();
+</script>
+</body>
+</html>
