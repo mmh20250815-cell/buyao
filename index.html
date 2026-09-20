@@ -21,7 +21,10 @@
 </head>
 <body>
 <script>
-/* 補藥神器外殼：只做一件事——把 Apps Script 的網頁用 iframe 包進來，Google 那條「這個應用程式是由 Google Apps Script 的使用者建立」就不會出現。
+/* 補藥神器外殼（v2）：
+   1. 把 Apps Script 的網頁用 iframe 包進來，Google 那條「這個應用程式是由 Google Apps Script 的使用者建立」就不會出現。
+   2. 幫裡面的網頁錄音（裡面那一層包在 Google 的框框裡拿不到麥克風，最外層這一頁拿得到）：
+      裡面按 🎤 → 這裡錄最長 6 秒 → 把錄音丟回去 → 裡面送給後端聽寫（跟 LINE 語音同一套）。
    網址長這樣：外殼/?x=部署ID&app=鑰匙（藥師版）或 &dev=鑰匙（開發者版）。鑰匙由 LINE 給，這個檔案裡沒有任何秘密。 */
 (function(){
   var q = new URLSearchParams(location.search);
@@ -37,6 +40,56 @@
   f.setAttribute("allowfullscreen", "");
   f.title = "補藥神器";
   document.body.appendChild(f);
+
+  /* ── 錄音 ── */
+  var canMic = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+  var MAX_MS = 6000, rec = null, stream = null, chunks = [], timer = null;
+  function post(m){ try { f.contentWindow.postMessage(Object.assign({ buyao: 1 }, m), "*"); } catch (e) {} }
+  function pickMime(){
+    var list = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
+    for (var i = 0; i < list.length; i++) { try { if (MediaRecorder.isTypeSupported(list[i])) return list[i]; } catch (e) {} }
+    return "";
+  }
+  function stopAll(){
+    if (timer) { clearTimeout(timer); timer = null; }
+    try { if (rec && rec.state !== "inactive") rec.stop(); } catch (e) {}
+  }
+  function release(){ try { if (stream) stream.getTracks().forEach(function(t){ t.stop(); }); } catch (e) {} stream = null; rec = null; }
+  function start(){
+    if (rec && rec.state === "recording") return;
+    chunks = [];
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function(s){
+      stream = s;
+      var mime = pickMime();
+      try { rec = mime ? new MediaRecorder(s, { mimeType: mime }) : new MediaRecorder(s); }
+      catch (e) { release(); post({ t: "rec-error", why: "recorder" }); return; }
+      rec.ondataavailable = function(ev){ if (ev.data && ev.data.size) chunks.push(ev.data); };
+      rec.onstop = function(){
+        var type = rec && rec.mimeType || mime || "audio/mp4";
+        var blob = new Blob(chunks, { type: type });
+        release();
+        if (!blob.size) { post({ t: "audio", b64: "", mime: type, kb: 0 }); return; }
+        var r = new FileReader();
+        r.onload = function(){ var u = String(r.result); post({ t: "audio", b64: u.substring(u.indexOf(",") + 1), mime: type.split(";")[0], kb: Math.round(blob.size / 1024) }); };
+        r.onerror = function(){ post({ t: "rec-error", why: "read" }); };
+        r.readAsDataURL(blob);
+      };
+      rec.onerror = function(){ release(); post({ t: "rec-error", why: "recorder" }); };
+      rec.start();
+      post({ t: "rec-on" });
+      timer = setTimeout(stopAll, MAX_MS);
+    }).catch(function(err){
+      var why = err && (err.name === "NotAllowedError" || err.name === "SecurityError") ? "denied" : (err && err.name || "mic");
+      post({ t: "rec-error", why: why });
+    });
+  }
+  window.addEventListener("message", function(ev){
+    var m = ev.data;
+    if (!m || m.buyao !== 1 || ev.source !== f.contentWindow) return;
+    if (m.t === "hello") { post({ t: "ready", mic: canMic }); return; }
+    if (m.t === "rec-start") { if (canMic) start(); else post({ t: "rec-error", why: "nomic" }); return; }
+    if (m.t === "rec-stop") { stopAll(); return; }
+  });
 })();
 </script>
 </body>
