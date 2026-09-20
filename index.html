@@ -21,21 +21,24 @@
 </head>
 <body>
 <script>
-/* 補藥神器外殼（v3）：
+/* 補藥神器外殼（v4）：清單校對（?lst=）也走這裡。
    1. 把 Apps Script 的網頁用 iframe 包進來，Google 那條「這個應用程式是由 Google Apps Script 的使用者建立」就不會出現。
    2. 幫裡面的網頁錄音（裡面那一層包在 Google 的框框裡拿不到麥克風，最外層這一頁拿得到）：
       裡面按 🎤 → 這裡錄最長 6 秒 → 把錄音丟回去 → 裡面送給後端聽寫（跟 LINE 語音同一套）。
    網址長這樣：外殼/?x=部署ID&app=鑰匙（藥師版）或 &dev=鑰匙（開發者版）。鑰匙由 LINE 給，這個檔案裡沒有任何秘密。 */
 (function(){
   var q = new URLSearchParams(location.search);
-  var x = q.get("x") || "", app = q.get("app") || "", dev = q.get("dev") || "";
-  var tok = dev || app;
-  if (!/^[A-Za-z0-9_-]{20,}$/.test(x) || !/^[0-9a-f]{32}$/.test(tok)) {
+  var x = q.get("x") || "", app = q.get("app") || "", dev = q.get("dev") || "", lst = q.get("lst") || "";
+  var kind = lst ? "lst" : dev ? "dev" : "app", tok = lst || dev || app;
+  var okTok = kind === "lst" ? /^[0-9a-f]{16}$/.test(tok) : /^[0-9a-f]{32}$/.test(tok);
+  if (!/^[A-Za-z0-9_-]{20,}$/.test(x) || !okTok) {
     document.body.innerHTML = '<p class="msg">這條連結不完整。<br>回 LINE 按下面那排的「🌐 補藥神器網頁」再開一次。</p>';
     return;
   }
+  if (kind === "lst") document.title = "清單校對";
   var f = document.createElement("iframe");
-  f.src = "https://script.google.com/macros/s/" + x + "/exec?" + (dev ? "dev=" : "app=") + tok;
+  /* #up／#rv 這種頁內位置（清單校對用）一起帶進去 */
+  f.src = "https://script.google.com/macros/s/" + x + "/exec?" + kind + "=" + tok + (location.hash || "");
   f.allow = "camera; microphone";
   f.setAttribute("allowfullscreen", "");
   f.title = "補藥神器";
