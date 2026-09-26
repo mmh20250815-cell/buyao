@@ -1,4 +1,4 @@
-/* 補藥神器網頁 v11.20.1（藥品查詢）：畫面在 GitHub，資料由網頁專案的 API 給（見 index.html 的安全設定）。這個檔沒有任何秘密。 */
+/* 補藥神器網頁 v11.22.2（藥品查詢）：畫面在 GitHub，資料由網頁專案的 API 給（見 index.html 的安全設定）。這個檔沒有任何秘密。 */
 (function(){
   var $ = function(id){ return document.getElementById(id); };
   /* ══════════ 安全：不讓別的網站用框框把這一頁包進去（防有人做假網站騙人點）══════════ */
@@ -114,9 +114,24 @@
     return '<span class="ph"><img class="ki" src="'+ICON[kindOf(r)]+'" alt="">'+(th?'<img class="pi" src="'+esc(th)+'" loading="lazy" alt="" data-rm="">':'')+'</span>';
   }
   /* 一列的長相跟 LINE 公告卡一樣：照片｜藥名、中文（有數量就接 ×數量）、extra（公告補充）、劑型小圖＋錠／水＋CODE｜位置 */
+  /* v11.22.2：照片才有的：藥師寫在藥名後面的數量（×20） */
+  var PH_KEYS=["qty"];
+  function isPh(r){ return !!(r&&r.qty); }
+  function noPh(r){ var c={}, k; for (k in r) if (Object.prototype.hasOwnProperty.call(r,k) && PH_KEYS.indexOf(k)<0) c[k]=r[k]; return c; }
+  /* 照片那一份（查到的＋「可能是」的候選）裡有沒有這一支 */
+  function photoHas(res, code){ return (res.rows||[]).some(function(x){ return x.code===code; }) || (res.asks||[]).some(function(a){ return (a.rows||[]).some(function(x){ return x.code===code; }); }); }
+  /* 開發者改完（✏️、📷 換照片、公告照片）：新的那一列照樣帶照片的數量 */
+  function keepPh(from, to){ PH_KEYS.forEach(function(k){ if(from&&from[k]) to[k]=from[k]; }); return to; }
+  /* 開發者改完：上一份清單（照片那一份也是）裡同一支換成新的，按「← 回清單」看到的是改好的（每一列自己的數量照舊） */
+  function swapRow(nr){
+    if (!LAST) return;
+    var fix=function(list){ for (var i=0;list&&i<list.length;i++) if (list[i].code===nr.code) list[i]=keepPh(list[i], noPh(nr)); };
+    fix(LAST.rows);
+    if (LAST.photo){ if (LAST.photo.rows!==LAST.rows) fix(LAST.photo.rows); (LAST.photo.asks||[]).forEach(function(a){ fix(a.rows); }); }
+  }
   function rowHtml(r, extra){
     var k=kindOf(r);
-    return '<button type="button" class="row" data-code="'+esc(r.code)+'">'+thumbHtml(r)
+    return '<button type="button" class="row" data-code="'+esc(r.code)+'"'+(isPh(r)?' data-ph="1"':'')+'>'+thumbHtml(r)
       +'<span class="n"><b>'+esc(r.brand)+'</b><span class="z">'+esc(r.chName||"")+(r.qty?'　×'+esc(r.qty):'')+'</span>'+(extra||'')
       +'<span class="k"><img src="'+ICON[k]+'" alt="">'+esc(k)+'<span class="c mono">'+esc(r.code)+'</span></span></span>'
       +'<span class="l">'+esc(r.location||"")+'</span></button>';
@@ -216,14 +231,22 @@
     var rows=res.rows||[], asks=res.asks||[], read=res.read||[];
     var chips='';
     if (read.length){ chips='<div class="chips">'+read.map(function(x){ return '<span class="'+(x.none?"no":"ok")+'">'+esc(x.shown)+(x.qty?' ×'+esc(x.qty):'')+'</span>'; }).join('')+'</div>'; }
-    if (rows.length===1 && !asks.length){ renderCard(rows[0], null); return; }
-    var h='<div class="list"><div class="h">📷 讀到 '+num(read.length)+' 行，查到 '+num(rows.length)+' 個品項'+(res.via?'（'+esc(res.via)+'）':'')+'</div>'+chips;
-    rows.forEach(function(r){ FULL[r.code]=r; h+=rowHtml(r); });
-    if (!rows.length && !asks.length) h+='<div class="none">沒有對到院內的藥。拍清楚一點（字面朝上、光線夠）再試，或直接打字查。</div>';
-    h+='</div>';
+    /* 只查到一支就直接出卡片；v11.22.2：OCR 接手的（res.via：AI 沒讀到、可能有漏）照樣出清單，上面那一句才看得到 */
+    if (rows.length===1 && !asks.length && !res.via){ renderCard(rows[0], null); return; }
+    /* v11.22.2：記住這一份，卡片上的「← 回清單」回到這裡（以前會回到更早的查詢清單） */
+    LAST={rows:rows, photo:res};
+    var h='', mine={};
+    /* 語音只有候選（沒有讀到的行、也沒有查到的）→ 不出「📷 讀到 0 行」那一塊 */
+    if (rows.length || read.length || !asks.length){
+      h='<div class="list"><div class="h">📷 讀到 '+num(read.length)+' 行，查到 '+num(rows.length)+' 個品項'+(res.via?'（'+esc(res.via)+'）':'')+'</div>'+chips;
+      rows.forEach(function(r){ FULL[r.code]=r; mine[r.code]=1; h+=rowHtml(r); });
+      if (!rows.length && !asks.length) h+='<div class="none">沒有對到院內的藥。拍清楚一點（字面朝上、光線夠）再試，或直接打字查。</div>';
+      h+='</div>';
+    }
     asks.forEach(function(a){
       h+='<div class="list"><div class="g">❓ 「'+esc(a.name)+'」沒對到，可能是：</div>';
-      a.rows.forEach(function(r){ FULL[r.code]=r; h+=rowHtml(r); });
+      /* v11.22.2：候選裡剛好有上面查到的那一支 → 不蓋掉上面那一列（它帶著照片上的數量） */
+      a.rows.forEach(function(r){ if(!mine[r.code]) FULL[r.code]=r; h+=rowHtml(r); });
       h+='</div>';
     });
     out.innerHTML=h+homeBtn();
@@ -234,7 +257,7 @@
     var spot = SPOT[r.code] || (r.spots&&r.spots.length ? r.spots[0].name : "");
     var mapUrl = r.map||"";
     if (r.spots&&r.spots.length){ r.spots.forEach(function(s){ if(s.name===spot&&s.map) mapUrl=s.map; }); }
-    var h='<article class="card" id="card">';
+    var h='<article class="card" id="card" data-code="'+esc(r.code)+'">';
     h+='<div class="head"><div class="t"><div class="code mono">'+esc(r.code)+(r.qty?' <span class="qty">×'+esc(r.qty)+'</span>':'')+'</div><div class="brand">'+esc(r.brand)+'</div>'
       +(r.chName?'<div class="zh">'+esc(r.chName)+'</div>':'')+(r.generic?'<div class="gen">'+esc(r.generic)+'</div>':'')+'</div>'
       +'<div class="side">'+(r.ref?'<a class="icon" href="'+esc(r.ref)+'" target="_blank" rel="noopener noreferrer" title="點圖院內藥物查詢">':'<div class="icon" title="'+esc(r.form||"")+'">')
@@ -267,24 +290,31 @@
     h+='<div id="same">'+(SAME[r.code]?sameHtml(SAME[r.code]):'')+'</div>';
     /* 卡片最下面：有清單才有「← 回清單」；開發者版多一顆「✏️ 修改」（跟 LINE 卡片一樣）。首頁請點左上 logo。 */
     var acts=[];
-    if (backTo&&backTo.length>1) acts.push('<button type="button" class="quiet" id="back">← 回清單</button>');
+    if (backTo&&(backTo.length>1||(LAST&&LAST.photo&&LAST.rows===backTo))) acts.push('<button type="button" class="quiet" id="back">← 回清單</button>');
     /*DEV*/if (DEV) acts.push('<button type="button" class="edit" id="edit">✏️ 修改</button>');/*/DEV*/
     if (acts.length) h+='<div class="actions">'+acts.join("")+'</div>';
     h+='</article>';
     out.innerHTML=h;
     Array.prototype.forEach.call(out.querySelectorAll("img[data-big]"),function(im){ im.onclick=function(){ $("lbimg").src=im.dataset.big; $("lb").hidden=false; }; });
     Array.prototype.forEach.call(out.querySelectorAll(".spots button"),function(b){ b.onclick=function(){ SPOT[r.code]=b.dataset.spot; renderCard(r, backTo); }; });
-    if ($("back")) $("back").onclick=function(){ renderList(backTo); };
-    if (!SAME[r.code]) call("appSame",[T, r.code],function(res){ if(!res||res.err) return; SAME[r.code]=res; var el=$("same"); if(el&&out.contains(el)&&el.closest("article")&&el.closest("article").querySelector(".code").textContent===r.code) el.innerHTML=sameHtml(res); });
+    if ($("back")) $("back").onclick=function(){ if (LAST&&LAST.photo&&LAST.rows===backTo) renderPhoto(LAST.photo); else renderList(backTo); };
+    if (!SAME[r.code]) call("appSame",[T, r.code],function(res){ if(!res||res.err) return; SAME[r.code]=res; var el=$("same"); if(el&&out.contains(el)&&el.closest("article")&&el.closest("article").getAttribute("data-code")===String(r.code)) el.innerHTML=sameHtml(res); });   /* v11.22.2：比卡片上記的 CODE（以前比 .code 的字，有「×數量」時永遠對不上，藥品家族第一次打開出不來） */
     /*DEV*/if ($("edit")) $("edit").onclick=function(){ renderEdit(r, backTo); };/*/DEV*/
     window.scrollTo({top:0});
   }
   /* 點清單任何一列：查過的直接開卡片，沒查過的（首頁的精簡列）用 CODE 去後端拿完整資料 */
   /* 從查詢清單點進卡片 → 卡片有「← 回清單」（回到同一份清單、同樣的分組） */
-  function openCode(code){ if (FULL[code]) renderCard(FULL[code], LAST&&LAST.rows&&LAST.rows.length>1&&LAST.rows.some(function(x){return x.code===code;})?LAST.rows:null); else search(code); }
+  /* v11.22.2：照片上的數量（×20）只跟著照片那一份清單走；
+     首頁、公告、藥品家族裡點到同一支（FULL 裡還是照片那一列）→ 開沒有數量的卡片，不會把紙條上的數量帶到別的地方 */
+  function openCode(code, ph){
+    var r=FULL[code]; if (r && !ph && isPh(r)) r=noPh(r);
+    /* 「← 回清單」：照片那一份（查到的、候選的都算，幾列都一樣）回照片；查詢清單照舊（兩列以上才有） */
+    var back = LAST&&LAST.photo ? (photoHas(LAST.photo, code)?LAST.rows:null) : (LAST&&LAST.rows&&LAST.rows.length>1&&LAST.rows.some(function(x){return x.code===code;})?LAST.rows:null);
+    if (r) renderCard(r, back); else search(code);
+  }
   out.addEventListener("click", function(e){
     var b=e.target.closest ? e.target.closest("button") : null; if(!b) return;
-    if (b.dataset.code){ openCode(b.dataset.code); return; }
+    if (b.dataset.code){ openCode(b.dataset.code, b.hasAttribute("data-ph")); return; }
     if (b.dataset.go==="home"){ renderHome(); return; }
     if (b.dataset.ncat!==undefined){ NCAT=+b.dataset.ncat; Array.prototype.forEach.call(out.querySelectorAll("[data-ncat]"),function(t){ t.setAttribute("aria-selected", +t.dataset.ncat===NCAT); }); if(HOME) fillNotice(HOME.notices||[]); return; }
     if (b.dataset.tab){ TAB=b.dataset.tab; try{localStorage.setItem("bt",TAB);}catch(x){} Array.prototype.forEach.call(out.querySelectorAll("[data-tab]"),function(t){ t.setAttribute("aria-selected", t.dataset.tab===TAB); }); if(HOME) fillAll(HOME.drugs||[]); return; }
@@ -395,7 +425,7 @@
           if (!res || res.err){ $("e_picmsg").textContent="❌ "+(res&&res.err||"沒存成"); setHint("❌ "+(res&&res.err||"照片沒存成"), true); return; }
           $("e_picmsg").textContent="✅ 換好了（雲端 "+(res.name||"")+(res.moved&&res.moved.length?"；舊的移到「舊照片」":"")+"）新照片要幾秒鐘才會出現";
           if (res.url){ var im=$("e_picimg"); var th=String(res.url).replace(/([?&]sz=w)\d+/,"$1120"); if(im) im.src=th; else { var ph=$("e_picbtn").parentNode.querySelector(".ph"); if(ph) ph.insertAdjacentHTML("beforeend",'<img class="pi" id="e_picimg" src="'+esc(th)+'" alt="" data-rm="">'); } r.photo=res.url; r.thumb=th; if($("e_photo")) $("e_photo").value=res.url; v.photo=res.url; }
-          if (res.row){ FULL[res.row.code]=res.row; r=res.row; }
+          if (res.row){ keepPh(r, res.row); FULL[res.row.code]=res.row; r=res.row; swapRow(res.row); }
           HOME=null;
           setHint("✅ "+r.code+" 照片換好了");
         });
@@ -416,7 +446,7 @@
           if (!res || res.err){ $("e_npicmsg").textContent="❌ "+(res&&res.err||"沒存成"); setHint("❌ "+(res&&res.err||"公告照片沒存成"), true); return; }
           npicDel=false; $("e_npicmsg").textContent="✅ 公告照片換好了（雲端 公告照片／"+(res.name||"")+"）"+(v.nk?"":"　⚠️ 這支藥還沒掛公告，掛上才會顯示");
           if (res.url){ var th=String(res.url).replace(/([?&]sz=w)\d+/,"$1120"); $("e_npicph").innerHTML='<img class="pi" id="e_npicimg" src="'+esc(th)+'" alt="" data-rm="">'; v.npic=res.url; }
-          if (res.row){ FULL[res.row.code]=res.row; r=res.row; }
+          if (res.row){ keepPh(r, res.row); FULL[res.row.code]=res.row; r=res.row; swapRow(res.row); }
           HOME=null;
         });
       });
@@ -447,7 +477,7 @@
         var done=res.done||[], errs=res.errs||[];
         if (errs.length) setHint((done.length?"✅ 改好 "+done.join("、")+"；":"")+"⚠️ 沒改成："+errs.join("；"), true);
         else setHint("✅ 改好 "+done.length+" 項（"+done.join("、")+"），已寫進試算表"+(res.undo?"　↩️ 改錯了：LINE 打「復原 "+res.undo+"」":""));
-        var nr=res.row?res.row:r; if(res.row) FULL[nr.code]=nr;
+        var nr=res.row?res.row:r; if(res.row){ keepPh(r, nr); FULL[nr.code]=nr; swapRow(nr); }   /* v11.22.2：照片來的那一張，改完照樣帶數量；上一份清單裡那一列也換成改好的 */
         HOME=null;                      /* 首頁的公告、藥品清單下次回首頁重抓 */
         renderCard(nr, backTo);
       });
